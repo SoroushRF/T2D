@@ -1,10 +1,11 @@
 import os
 import unittest
-import pandas as pd
-import numpy as np
 
-from spreadsheet_manager import SpreadsheetManager
+import pandas as pd
+
 from document_generator import export_to_docx, export_to_pdf
+from spreadsheet_manager import SpreadsheetManager
+
 
 class TestSpreadsheetManager(unittest.TestCase):
     def setUp(self):
@@ -14,7 +15,7 @@ class TestSpreadsheetManager(unittest.TestCase):
             "Name": ["Alice", "Bob", "Charlie"],
             "Age": [25, 30, 35],
             "Salary": [50000.0, 60000.0, 70000.0],
-            "Active": [True, False, True]
+            "Active": [True, False, True],
         }
         pd.DataFrame(self.data).to_csv(self.test_filename, index=False)
         self.manager = SpreadsheetManager()
@@ -38,7 +39,7 @@ class TestSpreadsheetManager(unittest.TestCase):
         self.assertEqual(len(self.manager.df), 2)
         # Position 1 should now be Charlie
         self.assertEqual(self.manager.df.iloc[1]["Name"], "Charlie")
-        
+
         # Test index out of bounds
         with self.assertRaises(IndexError):
             self.manager.delete_row(5)
@@ -114,7 +115,7 @@ class TestSpreadsheetManager(unittest.TestCase):
         self.manager.delete_row(0)
         self.manager.delete_col("Salary")
         self.assertEqual(len(self.manager.df), 2)
-        
+
         self.manager.reset()
         self.assertEqual(len(self.manager.df), 3)
         self.assertIn("Salary", self.manager.df.columns)
@@ -147,7 +148,7 @@ class TestSpreadsheetManager(unittest.TestCase):
         self.assertEqual(matches[0][1], "Name")
 
         # Find matches for numeric pattern
-        matches = self.manager.find_pattern(r"^3\d$") # Matches 30 or 35
+        matches = self.manager.find_pattern(r"^3\d$")  # Matches 30 or 35
         self.assertEqual(len(matches), 2)
 
     def test_find_and_replace(self):
@@ -177,19 +178,16 @@ class TestSpreadsheetManager(unittest.TestCase):
     def test_auto_date_detection_and_formatting(self):
         # Create a temp file with date strings
         temp_date_file = "temp_date_test.csv"
-        date_data = {
-            "Event": ["Start", "End"],
-            "Date": ["2026-06-07", "2026-06-08 12:30:00"]
-        }
+        date_data = {"Event": ["Start", "End"], "Date": ["2026-06-07", "2026-06-08 12:30:00"]}
         pd.DataFrame(date_data).to_csv(temp_date_file, index=False)
-        
+
         try:
             m = SpreadsheetManager()
             m.load_file(temp_date_file)
-            
+
             # Verify it is parsed as datetime
             self.assertTrue(pd.api.types.is_datetime64_any_dtype(m.df["Date"].dtype))
-            
+
             # Verify rows are formatted consistently
             rows = m.get_rows()
             self.assertEqual(rows[0][1], "2026-06-07")
@@ -203,7 +201,7 @@ class TestSpreadsheetManager(unittest.TestCase):
         self.manager.clear_cell(0, "Salary")
         # Default placeholder is ""
         self.assertEqual(self.manager.get_rows()[0][2], "")
-        
+
         # Set custom placeholder
         self.manager.nan_placeholder = "N/A"
         self.assertEqual(self.manager.get_rows()[0][2], "N/A")

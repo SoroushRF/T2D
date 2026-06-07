@@ -1,16 +1,17 @@
 import os
-from typing import List, Dict, Tuple, Optional, Any
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+
 
 class DataFramePatch:
     def __init__(self, df_before, df_after):
-        self.type = 'full'
+        self.type = "full"
         self.data = None
-        
+
         # If shape is the same and columns match, store cell-level diff
         if df_before.shape == df_after.shape and list(df_before.columns) == list(df_after.columns):
-            self.type = 'cell_diff'
+            self.type = "cell_diff"
             # Find all elements that differ, handling NaN comparisons
             diff_mask = (df_before != df_after) & ~(df_before.isna() & df_after.isna())
             diff_indices = np.where(diff_mask)
@@ -19,7 +20,7 @@ class DataFramePatch:
                 self.data.append((int(r), int(c), df_before.iloc[r, c]))
         # If a row was deleted (shape is df_before.shape[0] - 1)
         elif df_before.shape[0] == df_after.shape[0] + 1 and list(df_before.columns) == list(df_after.columns):
-            self.type = 'row_deleted'
+            self.type = "row_deleted"
             mismatch_idx = None
             for i in range(len(df_after)):
                 if not df_before.iloc[i].equals(df_after.iloc[i]):
@@ -30,18 +31,18 @@ class DataFramePatch:
             self.data = (mismatch_idx, df_before.iloc[mismatch_idx].copy())
         else:
             # Fallback to full copy
-            self.type = 'full'
+            self.type = "full"
             self.data = df_before.copy()
 
     def apply(self, df_current):
-        if self.type == 'full':
+        if self.type == "full":
             return self.data.copy()
-        elif self.type == 'cell_diff':
+        elif self.type == "cell_diff":
             df_new = df_current.copy()
             for r, c, val in self.data:
                 df_new.iloc[r, c] = val
             return df_new
-        elif self.type == 'row_deleted':
+        elif self.type == "row_deleted":
             df_new = df_current.copy()
             row_idx, row_series = self.data
             df_top = df_new.iloc[:row_idx]
@@ -49,6 +50,7 @@ class DataFramePatch:
             new_row_df = pd.DataFrame([row_series])
             return pd.concat([df_top, new_row_df, df_bottom]).reset_index(drop=True)
         return df_current
+
 
 class SpreadsheetManager:
     def __init__(self):
@@ -71,32 +73,35 @@ class SpreadsheetManager:
         self.filepath = filepath
         self.sheet_name = sheet_name
 
-        if ext == '.csv':
+        if ext == ".csv":
             self.df = pd.read_csv(filepath)
             self.available_sheets = []
-        elif ext in ['.xlsx', '.xls']:
+        elif ext in [".xlsx", ".xls"]:
             excel_file = pd.ExcelFile(filepath)
             self.available_sheets = excel_file.sheet_names
             if not sheet_name:
                 self.sheet_name = self.available_sheets[0]
             elif sheet_name not in self.available_sheets:
-                raise ValueError(f"Sheet '{sheet_name}' not found. Available sheets: {', '.join(self.available_sheets)}")
-            
+                raise ValueError(
+                    f"Sheet '{sheet_name}' not found. Available sheets: {', '.join(self.available_sheets)}"
+                )
+
             self.df = pd.read_excel(filepath, sheet_name=self.sheet_name)
         else:
             raise ValueError("Unsupported file format. Please load a CSV or Excel file (.csv, .xlsx, .xls).")
 
-        # Clean column names to make querying easier (remove spaces and special characters for ease of use, but keep originals)
+        # Clean column names to make querying easier (remove spaces and
+        # special characters for ease of use, but keep originals)
         self.df.columns = [str(col).strip() for col in self.df.columns]
-        
+
         # Detect date-formatted strings automatically
         for col in self.df.columns:
             if pd.api.types.is_object_dtype(self.df[col].dtype) or pd.api.types.is_string_dtype(self.df[col].dtype):
                 try:
                     non_na = self.df[col].dropna()
                     if not non_na.empty and all(isinstance(val, str) for val in non_na):
-                        if any('-' in val or '/' in val for val in non_na):
-                            self.df[col] = pd.to_datetime(self.df[col], errors='raise', format='mixed')
+                        if any("-" in val or "/" in val for val in non_na):
+                            self.df[col] = pd.to_datetime(self.df[col], errors="raise", format="mixed")
                 except (ValueError, TypeError, OverflowError):
                     pass
 
@@ -126,7 +131,7 @@ class SpreadsheetManager:
             raise ValueError("Nothing to undo.")
         patch = self.undo_stack.pop()
         df_before = patch.apply(self.df)
-        
+
         # Create redo patch
         redo_patch = DataFramePatch(self.df, df_before)
         self.redo_stack.append(redo_patch)
@@ -138,7 +143,7 @@ class SpreadsheetManager:
             raise ValueError("Nothing to redo.")
         patch = self.redo_stack.pop()
         df_after = patch.apply(self.df)
-        
+
         # Create undo patch
         undo_patch = DataFramePatch(self.df, df_after)
         self.undo_stack.append(undo_patch)
@@ -158,7 +163,7 @@ class SpreadsheetManager:
             raise ValueError("No file loaded.")
         if row_idx < 0 or row_idx > len(self.df):
             raise IndexError(f"Row index {row_idx} is out of bounds (0 to {len(self.df)}).")
-        
+
         self._prepare_change()
         new_row_data = {col: np.nan for col in self.df.columns}
         if data_dict:
@@ -166,7 +171,7 @@ class SpreadsheetManager:
                 if k in new_row_data:
                     new_row_data[k] = v
         new_row_df = pd.DataFrame([new_row_data])
-        
+
         df_top = self.df.iloc[:row_idx]
         df_bottom = self.df.iloc[row_idx:]
         self.df = pd.concat([df_top, new_row_df, df_bottom]).reset_index(drop=True)
@@ -178,13 +183,13 @@ class SpreadsheetManager:
             raise ValueError("No file loaded.")
         if col_name in self.df.columns:
             raise ValueError(f"Column '{col_name}' already exists.")
-        
+
         self._prepare_change()
         if position is None:
             position = len(self.df.columns)
         elif position < 0 or position > len(self.df.columns):
             raise IndexError(f"Position {position} is out of bounds (0 to {len(self.df.columns)}).")
-            
+
         self.df.insert(loc=position, column=col_name, value=default_value)
         self._commit_change()
 
@@ -198,10 +203,10 @@ class SpreadsheetManager:
                 old_name = matching_cols[0]
             else:
                 raise ValueError(f"Column '{old_name}' not found.")
-        
+
         if new_name in self.df.columns:
             raise ValueError(f"Column '{new_name}' already exists.")
-            
+
         self._prepare_change()
         self.df = self.df.rename(columns={old_name: new_name})
         self._commit_change()
@@ -212,17 +217,17 @@ class SpreadsheetManager:
             raise ValueError("No file loaded.")
         if row_idx < 0 or row_idx >= len(self.df):
             raise IndexError(f"Row index {row_idx} is out of bounds (0 to {len(self.df) - 1}).")
- 
+
         self._prepare_change()
         # Drop by positional index
         self.df = self.df.drop(self.df.index[row_idx]).reset_index(drop=True)
         self._commit_change()
- 
+
     def delete_col(self, col_name):
         """Deletes a column by name."""
         if self.df is None:
             raise ValueError("No file loaded.")
-        
+
         # Check exact match
         if col_name not in self.df.columns:
             # Check case-insensitive match
@@ -231,7 +236,7 @@ class SpreadsheetManager:
                 col_name = matching_cols[0]
             else:
                 raise ValueError(f"Column '{col_name}' not found. Available columns: {', '.join(self.df.columns)}")
- 
+
         self._prepare_change()
         self.df = self.df.drop(columns=[col_name])
         self._commit_change()
@@ -242,20 +247,20 @@ class SpreadsheetManager:
             raise ValueError("No file loaded.")
         if row_idx < 0 or row_idx >= len(self.df):
             raise IndexError(f"Row index {row_idx} is out of bounds (0 to {len(self.df) - 1}).")
-        
+
         if col_name not in self.df.columns:
             matching_cols = [col for col in self.df.columns if col.lower() == col_name.lower()]
             if len(matching_cols) == 1:
                 col_name = matching_cols[0]
             else:
                 raise ValueError(f"Column '{col_name}' not found. Available columns: {', '.join(self.df.columns)}")
- 
+
         self._prepare_change()
-        
+
         # Type conversion and validation
         col_idx = self.df.columns.get_loc(col_name)
         dtype = self.df.dtypes.iloc[col_idx]
-        
+
         if new_value == "" or new_value.lower() == "nan" or new_value.lower() == "none":
             converted_value = np.nan
         else:
@@ -273,28 +278,31 @@ class SpreadsheetManager:
                     raise ValueError(f"Value '{new_value}' is not a valid float for column '{col_name}'.")
             elif pd.api.types.is_bool_dtype(dtype):
                 val_lower = new_value.lower()
-                if val_lower in ('true', '1', 'yes', 'y', 't'):
+                if val_lower in ("true", "1", "yes", "y", "t"):
                     converted_value = True
-                elif val_lower in ('false', '0', 'no', 'n', 'f'):
+                elif val_lower in ("false", "0", "no", "n", "f"):
                     converted_value = False
                 else:
                     self._df_before_change = None
-                    raise ValueError(f"Value '{new_value}' is not a valid boolean for column '{col_name}'. Expected true/false, yes/no, 1/0.")
+                    raise ValueError(
+                        f"Value '{new_value}' is not a valid boolean for column '{col_name}'. "
+                        "Expected true/false, yes/no, 1/0."
+                    )
             elif pd.api.types.is_datetime64_any_dtype(dtype):
                 try:
-                    converted_value = pd.to_datetime(new_value, format='mixed')
+                    converted_value = pd.to_datetime(new_value, format="mixed")
                 except Exception:
                     self._df_before_change = None
                     raise ValueError(f"Value '{new_value}' is not a valid date/time for column '{col_name}'.")
             else:
                 converted_value = new_value
-                if isinstance(new_value, str) and ('-' in new_value or '/' in new_value):
+                if isinstance(new_value, str) and ("-" in new_value or "/" in new_value):
                     try:
                         # Only convert if it matches standard date/time formats
-                        converted_value = pd.to_datetime(new_value, format='mixed')
+                        converted_value = pd.to_datetime(new_value, format="mixed")
                     except Exception:
                         pass
- 
+
         self.df.iloc[row_idx, col_idx] = converted_value
         self._commit_change()
 
@@ -305,14 +313,15 @@ class SpreadsheetManager:
     def find_pattern(self, pattern):
         """Finds regex matches in the spreadsheet and returns list of (row_idx, col_name, val)."""
         import re
+
         if self.df is None:
             raise ValueError("No file loaded.")
-        
+
         try:
             regex = re.compile(pattern)
         except re.error as e:
             raise ValueError(f"Invalid regex pattern: {e}")
-            
+
         matches = []
         for col in self.df.columns:
             col_idx = self.df.columns.get_loc(col)
@@ -326,9 +335,10 @@ class SpreadsheetManager:
     def find_and_replace(self, pattern, replacement, col_name=None):
         """Regex find and replace on the specified column or all columns."""
         import re
+
         if self.df is None:
             raise ValueError("No file loaded.")
-        
+
         cols_to_process = []
         if col_name:
             if col_name not in self.df.columns:
@@ -340,24 +350,24 @@ class SpreadsheetManager:
             cols_to_process = [col_name]
         else:
             cols_to_process = list(self.df.columns)
-            
+
         self._prepare_change()
-        
+
         try:
             regex = re.compile(pattern)
         except re.error as e:
             self._df_before_change = None
             raise ValueError(f"Invalid regex pattern: {e}")
-            
+
         cells_modified = 0
         for col in cols_to_process:
             col_idx = self.df.columns.get_loc(col)
             dtype = self.df.dtypes.iloc[col_idx]
-            
+
             for row_idx in range(len(self.df)):
                 val = self.df.iloc[row_idx, col_idx]
                 val_str = "" if pd.isna(val) else str(val)
-                
+
                 if regex.search(val_str):
                     new_val_str = regex.sub(replacement, val_str)
                     if new_val_str != val_str:
@@ -371,13 +381,13 @@ class SpreadsheetManager:
                                 elif pd.api.types.is_float_dtype(dtype):
                                     converted_value = float(new_val_str)
                                 elif pd.api.types.is_bool_dtype(dtype):
-                                    converted_value = new_val_str.lower() in ('true', '1', 'yes', 'y', 't')
+                                    converted_value = new_val_str.lower() in ("true", "1", "yes", "y", "t")
                             except ValueError:
                                 pass
-                        
+
                         self.df.iloc[row_idx, col_idx] = converted_value
                         cells_modified += 1
-                        
+
         self._commit_change()
         return cells_modified
 
@@ -385,7 +395,7 @@ class SpreadsheetManager:
         """Filters the dataframe using a pandas query string."""
         if self.df is None:
             raise ValueError("No file loaded.")
-        
+
         self._prepare_change()
         try:
             # We filter and keep the matching rows, reset index to maintain positional logic
@@ -401,7 +411,7 @@ class SpreadsheetManager:
         """Sorts the dataframe by a column."""
         if self.df is None:
             raise ValueError("No file loaded.")
-        
+
         if col_name not in self.df.columns:
             matching_cols = [col for col in self.df.columns if col.lower() == col_name.lower()]
             if len(matching_cols) == 1:
@@ -423,7 +433,7 @@ class SpreadsheetManager:
         """Returns rows as a list of lists/tuples, handling NaN formatting."""
         if self.df is None:
             return []
-        
+
         rows = []
         for i, row in self.df.iterrows():
             formatted_row = []
@@ -434,9 +444,9 @@ class SpreadsheetManager:
                     # Format datetime consistently
                     if isinstance(val, pd.Timestamp) or pd.api.types.is_datetime64_any_dtype(type(val)):
                         if val.hour == 0 and val.minute == 0 and val.second == 0:
-                            formatted_row.append(val.strftime('%Y-%m-%d'))
+                            formatted_row.append(val.strftime("%Y-%m-%d"))
                         else:
-                            formatted_row.append(val.strftime('%Y-%m-%d %H:%M:%S'))
+                            formatted_row.append(val.strftime("%Y-%m-%d %H:%M:%S"))
                     # Format floats nicely
                     elif isinstance(val, float):
                         if val.is_integer():
@@ -452,7 +462,7 @@ class SpreadsheetManager:
         """Returns brief text summarizing the current sheet status."""
         if self.df is None:
             return "No spreadsheet loaded."
-        
+
         num_rows, num_cols = self.df.shape
         undo_avail = len(self.history)
         msg = f"File: {os.path.basename(self.filepath)}"
