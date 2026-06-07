@@ -10,6 +10,7 @@ class SpreadsheetManager:
         self.history = []  # Stack of (df_copy) for undo operations
         self.sheet_name = None
         self.available_sheets = []
+        self.nan_placeholder = ""
 
     def load_file(self, filepath, sheet_name=None):
         """Loads a CSV or Excel file into a pandas DataFrame."""
@@ -36,9 +37,19 @@ class SpreadsheetManager:
             raise ValueError("Unsupported file format. Please load a CSV or Excel file (.csv, .xlsx, .xls).")
 
         # Clean column names to make querying easier (remove spaces and special characters for ease of use, but keep originals)
-        # Actually, let's keep original columns, but handle string stripping
         self.df.columns = [str(col).strip() for col in self.df.columns]
         
+        # Detect date-formatted strings automatically
+        for col in self.df.columns:
+            if pd.api.types.is_object_dtype(self.df[col].dtype) or pd.api.types.is_string_dtype(self.df[col].dtype):
+                try:
+                    non_na = self.df[col].dropna()
+                    if not non_na.empty and all(isinstance(val, str) for val in non_na):
+                        if any('-' in val or '/' in val for val in non_na):
+                            self.df[col] = pd.to_datetime(self.df[col], errors='raise', format='mixed')
+                except (ValueError, TypeError, OverflowError):
+                    pass
+
         # Save original copy for resets
         self.original_df = self.df.copy()
         self.history = []
@@ -159,24 +170,48 @@ class SpreadsheetManager:
 
         self._save_to_history()
         
-        # Type conversion attempt
+        # Type conversion and validation
         col_idx = self.df.columns.get_loc(col_name)
         dtype = self.df.dtypes.iloc[col_idx]
         
-        converted_value = new_value
         if new_value == "" or new_value.lower() == "nan" or new_value.lower() == "none":
             converted_value = np.nan
         else:
-            try:
-                if pd.api.types.is_integer_dtype(dtype):
+            if pd.api.types.is_integer_dtype(dtype):
+                try:
                     converted_value = int(new_value)
-                elif pd.api.types.is_float_dtype(dtype):
+                except ValueError:
+                    self.history.pop()
+                    raise ValueError(f"Value '{new_value}' is not a valid integer for column '{col_name}'.")
+            elif pd.api.types.is_float_dtype(dtype):
+                try:
                     converted_value = float(new_value)
-                elif pd.api.types.is_bool_dtype(dtype):
-                    converted_value = new_value.lower() in ('true', '1', 'yes', 'y', 't')
-            except ValueError:
-                # Keep it as string if conversion fails
-                pass
+                except ValueError:
+                    self.history.pop()
+                    raise ValueError(f"Value '{new_value}' is not a valid float for column '{col_name}'.")
+            elif pd.api.types.is_bool_dtype(dtype):
+                val_lower = new_value.lower()
+                if val_lower in ('true', '1', 'yes', 'y', 't'):
+                    converted_value = True
+                elif val_lower in ('false', '0', 'no', 'n', 'f'):
+                    converted_value = False
+                else:
+                    self.history.pop()
+                    raise ValueError(f"Value '{new_value}' is not a valid boolean for column '{col_name}'. Expected true/false, yes/no, 1/0.")
+            elif pd.api.types.is_datetime64_any_dtype(dtype):
+                try:
+                    converted_value = pd.to_datetime(new_value, format='mixed')
+                except Exception:
+                    self.history.pop()
+                    raise ValueError(f"Value '{new_value}' is not a valid date/time for column '{col_name}'.")
+            else:
+                converted_value = new_value
+                if isinstance(new_value, str) and ('-' in new_value or '/' in new_value):
+                    try:
+                        # Only convert if it matches standard date/time formats
+                        converted_value = pd.to_datetime(new_value, format='mixed')
+                    except Exception:
+                        pass
 
         self.df.iloc[row_idx, col_idx] = converted_value
 
@@ -308,10 +343,16 @@ class SpreadsheetManager:
             formatted_row = []
             for val in row:
                 if pd.isna(val):
-                    formatted_row.append("")
+                    formatted_row.append(self.nan_placeholder)
                 else:
+                    # Format datetime consistently
+                    if isinstance(val, pd.Timestamp) or pd.api.types.is_datetime64_any_dtype(type(val)):
+                        if val.hour == 0 and val.minute == 0 and val.second == 0:
+                            formatted_row.append(val.strftime('%Y-%m-%d'))
+                        else:
+                            formatted_row.append(val.strftime('%Y-%m-%d %H:%M:%S'))
                     # Format floats nicely
-                    if isinstance(val, float):
+                    elif isinstance(val, float):
                         if val.is_integer():
                             formatted_row.append(str(int(val)))
                         else:

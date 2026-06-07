@@ -388,6 +388,12 @@ class SpreadsheetApp(App):
                     self.log_success(f"Replace finished. Modified {modified} cell(s).")
                     self.log_info(self.manager.get_summary_text())
 
+                elif cmd_name in ['/set-nan']:
+                    char = args[0] if args else ""
+                    self.manager.nan_placeholder = char
+                    self.update_table()
+                    self.log_success(f"NaN placeholder set to '{char}'.")
+
                 elif cmd_name in ['/undo', '/u']:
                     self.manager.undo()
                     self.update_table()
@@ -475,6 +481,9 @@ class SpreadsheetApp(App):
 
         self.log_widget.write("[bold green]/replace <pattern> <replacement> [col][/bold green]")
         self.log_widget.write("  Executes a regex find-and-replace on a column (or all columns).")
+
+        self.log_widget.write("[bold green]/set-nan [char][/bold green]")
+        self.log_widget.write("  Sets custom character display for empty/null values.")
         
         self.log_widget.write("[bold green]/undo[/bold green] (or [bold green]/u[/bold green] or [bold green]Ctrl+Z[/bold green])")
         self.log_widget.write("  Undoes the last layout/data modification.")

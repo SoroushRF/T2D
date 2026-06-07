@@ -145,6 +145,53 @@ class TestSpreadsheetManager(unittest.TestCase):
         # Charlie ends with 'e', should become Charlia
         self.assertEqual(self.manager.df.iloc[2]["Name"], "Charlia")
 
+    def test_type_aware_validation(self):
+        # Age column is integer
+        with self.assertRaises(ValueError):
+            self.manager.edit_cell(0, "Age", "not_an_int")
+
+        # Salary column is float
+        with self.assertRaises(ValueError):
+            self.manager.edit_cell(0, "Salary", "not_a_float")
+
+        # Active column is boolean
+        with self.assertRaises(ValueError):
+            self.manager.edit_cell(0, "Active", "not_a_bool")
+
+    def test_auto_date_detection_and_formatting(self):
+        # Create a temp file with date strings
+        temp_date_file = "temp_date_test.csv"
+        date_data = {
+            "Event": ["Start", "End"],
+            "Date": ["2026-06-07", "2026-06-08 12:30:00"]
+        }
+        pd.DataFrame(date_data).to_csv(temp_date_file, index=False)
+        
+        try:
+            m = SpreadsheetManager()
+            m.load_file(temp_date_file)
+            
+            # Verify it is parsed as datetime
+            self.assertTrue(pd.api.types.is_datetime64_any_dtype(m.df["Date"].dtype))
+            
+            # Verify rows are formatted consistently
+            rows = m.get_rows()
+            self.assertEqual(rows[0][1], "2026-06-07")
+            self.assertEqual(rows[1][1], "2026-06-08 12:30:00")
+        finally:
+            if os.path.exists(temp_date_file):
+                os.remove(temp_date_file)
+
+    def test_nan_placeholder(self):
+        # Clear a cell
+        self.manager.clear_cell(0, "Salary")
+        # Default placeholder is ""
+        self.assertEqual(self.manager.get_rows()[0][2], "")
+        
+        # Set custom placeholder
+        self.manager.nan_placeholder = "N/A"
+        self.assertEqual(self.manager.get_rows()[0][2], "N/A")
+
     def test_export_docx(self):
         export_to_docx(self.manager.df, "test_out.docx")
         self.assertTrue(os.path.exists("test_out.docx"))
