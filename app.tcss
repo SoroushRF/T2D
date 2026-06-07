@@ -1,22 +1,38 @@
-/* Modern, sleek dark theme for Table to Doc TUI */
+/* Modern, sleek dark theme for Table to Doc TUI with design tokens */
+
+$bg-primary: #121214;
+$bg-secondary: #1a1a1e;
+$bg-tertiary: #151518;
+$accent-neon: #00e5ff;
+$accent-neon-hover: #00d2fc;
+$border-color: #2d3748;
+$text-primary: #e2e8f0;
+$text-secondary: #a0aec0;
+$text-light: #ffffff;
+
+$success: #4ade80;
+$error: #f87171;
+$info: #60a5fa;
+$warning: #fbbf24;
+$cmd: #a78bfa;
 
 Screen {
-    background: #121214;
-    color: #e2e8f0;
+    background: $bg-primary;
+    color: $text-primary;
 }
 
 Header {
     background: #1e1e24;
-    color: #00e5ff;
+    color: $accent-neon;
     text-style: bold;
-    border-bottom: double #00e5ff;
+    border-bottom: double $accent-neon;
     height: 3;
     content-align: center middle;
 }
 
 Footer {
-    background: #1a1a1e;
-    color: #a0aec0;
+    background: $bg-secondary;
+    color: $text-secondary;
 }
 
 /* Main layouts */
@@ -28,46 +44,55 @@ Footer {
 
 #table-container {
     height: 60%;
-    border: tall #2d3748;
-    background: #1a1a1e;
+    border: round $border-color;
+    background: $bg-secondary;
     margin: 1 1 0 1;
     padding: 0;
 }
 
 DataTable {
     height: 100%;
-    background: #1a1a1e;
-    color: #e2e8f0;
-    scrollbar-color: #2d3748;
-    scrollbar-color-hover: #00e5ff;
-    scrollbar-color-active: #00d2fc;
+    background: $bg-secondary;
+    color: $text-primary;
+    scrollbar-color: $border-color;
+    scrollbar-color-hover: $accent-neon;
+    scrollbar-color-active: $accent-neon-hover;
 }
 
 /* Header style for DataTable */
 DataTable > .datatable--header {
-    background: #2d3748;
-    color: #ffffff;
+    background: $border-color;
+    color: $text-light;
     text-style: bold;
 }
 
 /* Cursor highlighting in DataTable */
 DataTable > .datatable--cursor {
-    background: #00e5ff;
-    color: #121214;
+    background: $accent-neon;
+    color: $bg-primary;
     text-style: bold;
+}
+
+/* Alternate row styling */
+DataTable > .datatable--odd-row {
+    background: #202026;
+}
+
+DataTable > .datatable--even-row {
+    background: $bg-secondary;
 }
 
 #log-container {
     height: 25%;
-    border: tall #2d3748;
-    background: #151518;
+    border: round $border-color;
+    background: $bg-tertiary;
     margin: 0 1 0 1;
     padding: 0 1;
 }
 
 RichLog {
     height: 100%;
-    background: #151518;
+    background: $bg-tertiary;
     color: #cbd5e1;
 }
 
@@ -76,47 +101,79 @@ RichLog {
     margin: 0 1 1 1;
     layout: horizontal;
     background: #1e1e24;
-    border: solid #2d3748;
+    border: round $border-color;
 }
 
 #prompt-label {
     width: 5;
     content-align: center middle;
-    color: #00e5ff;
+    color: $accent-neon;
     text-style: bold;
-    background: #1a1a1e;
+    background: $bg-secondary;
 }
 
 #command-input {
     width: 1fr;
     border: none;
     background: #1e1e24;
-    color: #ffffff;
+    color: $text-light;
 }
 
 #command-input:focus {
-    color: #00e5ff;
+    color: $accent-neon;
 }
 
 /* Dialog and alert stylings */
 .success-text {
-    color: #4ade80;
+    color: $success;
 }
 
 .error-text {
-    color: #f87171;
+    color: $error;
     text-style: bold;
 }
 
 .info-text {
-    color: #60a5fa;
+    color: $info;
 }
 
 .warning-text {
-    color: #fbbf24;
+    color: $warning;
 }
 
 .cmd-text {
-    color: #a78bfa;
+    color: $cmd;
     text-style: bold;
+}
+
+/* Empty State Styling */
+#empty-state-panel {
+    align: center middle;
+    width: 100%;
+    height: 100%;
+    background: $bg-secondary;
+}
+
+.empty-state-title {
+    color: $accent-neon;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.empty-state-desc {
+    color: $text-secondary;
+    margin-bottom: 2;
+}
+
+#load-sample-btn {
+    background: $border-color;
+    color: $text-light;
+    border: none;
+    height: 3;
+    content-align: center middle;
+}
+
+#load-sample-btn:hover {
+    background: $accent-neon;
+    color: $bg-primary;
 }
