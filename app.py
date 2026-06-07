@@ -2,12 +2,19 @@ import os
 import shlex
 import sys
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Input, DataTable, RichLog, Label
+from textual.widgets import Header, Footer, Input, DataTable, RichLog, Label, Button, Static, LoadingIndicator
 from textual.containers import Container, Vertical, Horizontal
 from textual.binding import Binding
+from textual import work
 
 from spreadsheet_manager import SpreadsheetManager
 from document_generator import export_to_docx, export_to_pdf
+
+class EmptyStatePanel(Container):
+    def compose(self) -> ComposeResult:
+        yield Static("No Spreadsheet Loaded", classes="empty-state-title")
+        yield Static("Load a CSV or Excel file to begin editing.", classes="empty-state-desc")
+        yield Button("Load Sample Data", id="load-sample-btn", variant="primary")
 
 class SpreadsheetApp(App):
     CSS_PATH = "app.tcss"
@@ -30,11 +37,13 @@ class SpreadsheetApp(App):
         with Vertical(id="main-container"):
             with Container(id="table-container"):
                 yield DataTable()
+                yield EmptyStatePanel(id="empty-state-panel")
             with Container(id="log-container"):
                 yield RichLog(highlight=True, markup=True)
             with Container(id="input-container"):
                 yield Label(" / ", id="prompt-label")
                 yield Input(placeholder="Type a slash command here... (e.g. /load sales.csv, /help)", id="command-input")
+        yield Container(LoadingIndicator(), id="loading-overlay")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -58,16 +67,21 @@ class SpreadsheetApp(App):
         self.update_table()
 
     def update_table(self):
-        """Updates the DataTable representation of the spreadsheet."""
+        """Updates the DataTable representation of the spreadsheet thread-safely."""
+        self.call_from_thread(self._update_table_internal)
+
+    def _update_table_internal(self):
         table = self.query_one(DataTable)
-        table.clear(columns=True)
+        empty_panel = self.query_one(EmptyStatePanel)
         
         if self.manager.df is None:
-            table.add_column("System Status")
-            table.add_row("No spreadsheet loaded.")
-            table.add_row("Type /load <filepath> to load a CSV or Excel file.")
-            table.add_row("Example: /load samples/sample_data.csv")
+            table.display = False
+            empty_panel.display = True
             return
+        
+        table.display = True
+        empty_panel.display = False
+        table.clear(columns=True)
 
         headers = self.manager.get_headers()
         rows = self.manager.get_rows()
@@ -81,13 +95,23 @@ class SpreadsheetApp(App):
             table.add_row(str(idx), *row)
 
     def log_success(self, msg: str):
-        self.log_widget.write(f"[bold green]✔[/bold green] {msg}")
+        self.call_from_thread(self.log_widget.write, f"[bold green]✔[/bold green] {msg}")
 
     def log_error(self, msg: str):
-        self.log_widget.write(f"[bold red]✘ Error:[/bold red] [red]{msg}[/red]")
+        self.call_from_thread(self.log_widget.write, f"[bold red]✘ Error:[/bold red] [red]{msg}[/red]")
 
     def log_info(self, msg: str):
-        self.log_widget.write(f"[bold blue]ℹ[/bold blue] {msg}")
+        self.call_from_thread(self.log_widget.write, f"[bold blue]ℹ[/bold blue] {msg}")
+
+    def show_loading(self) -> None:
+        self.query_one("#loading-overlay").display = True
+
+    def hide_loading(self) -> None:
+        self.query_one("#loading-overlay").display = False
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "load-sample-btn":
+            self.execute_command("/load sample_data.csv")
 
     def action_trigger_undo(self) -> None:
         self.execute_command("/undo")
@@ -133,176 +157,181 @@ class SpreadsheetApp(App):
                 
                 self.execute_command(command_text)
 
+    @work(thread=True)
     def execute_command(self, raw_command: str):
         """Parses and executes a command string."""
-        # Print command to log
-        self.log_widget.write(f"[cmd]> {raw_command}[/cmd]")
-
-        if not raw_command.startswith('/'):
-            self.log_error("Commands must start with '/'. Type /help for usage instructions.")
-            return
-
-        # Special query handling: query expression might have unescaped quotes or symbols
-        # that shlex.split might struggle with or parse awkwardly.
-        parts = raw_command.split(None, 1)
-        cmd_name = parts[0].lower()
-        cmd_arg_str = parts[1] if len(parts) > 1 else ""
-
+        self.call_from_thread(self.show_loading)
         try:
-            # Parse commands with standard arguments using shlex
-            args = []
-            if cmd_arg_str and cmd_name not in ['/query', '/q']:
-                try:
-                    args = shlex.split(cmd_arg_str)
-                except ValueError as e:
-                    self.log_error(f"Command parsing error: {e}. Check your quotes.")
-                    return
+            # Print command to log
+            self.call_from_thread(self.log_widget.write, f"[cmd]> {raw_command}[/cmd]")
 
-            # Route commands
-            if cmd_name in ['/help', '/h']:
-                self.show_help_screen()
+            if not raw_command.startswith('/'):
+                self.log_error("Commands must start with '/'. Type /help for usage instructions.")
+                return
 
-            elif cmd_name in ['/load']:
-                if not args:
-                    self.log_error("Usage: /load <file_path> [sheet_name]")
-                    return
-                filepath = args[0]
-                sheet_name = args[1] if len(args) > 1 else None
-                
-                self.manager.load_file(filepath, sheet_name)
-                self.update_table()
-                self.log_success(f"Successfully loaded '{filepath}'")
-                self.log_info(self.manager.get_summary_text())
-                if self.manager.available_sheets:
-                    self.log_info(f"Available Sheets: {', '.join(self.manager.available_sheets)}")
+            # Special query handling: query expression might have unescaped quotes or symbols
+            # that shlex.split might struggle with or parse awkwardly.
+            parts = raw_command.split(None, 1)
+            cmd_name = parts[0].lower()
+            cmd_arg_str = parts[1] if len(parts) > 1 else ""
 
-            elif cmd_name in ['/delete-row', '/dr']:
-                if not args:
-                    self.log_error("Usage: /delete-row <row_index_number>")
-                    return
-                try:
-                    row_idx = int(args[0])
-                except ValueError:
-                    self.log_error("Row index must be an integer.")
-                    return
-                
-                self.manager.delete_row(row_idx)
-                self.update_table()
-                self.log_success(f"Row {row_idx} deleted.")
-                self.log_info(self.manager.get_summary_text())
+            try:
+                # Parse commands with standard arguments using shlex
+                args = []
+                if cmd_arg_str and cmd_name not in ['/query', '/q']:
+                    try:
+                        args = shlex.split(cmd_arg_str)
+                    except ValueError as e:
+                        self.log_error(f"Command parsing error: {e}. Check your quotes.")
+                        return
 
-            elif cmd_name in ['/delete-col', '/dc']:
-                if not args:
-                    self.log_error("Usage: /delete-col <column_name>")
-                    return
-                col_name = args[0]
-                
-                self.manager.delete_col(col_name)
-                self.update_table()
-                self.log_success(f"Column '{col_name}' deleted.")
-                self.log_info(self.manager.get_summary_text())
+                # Route commands
+                if cmd_name in ['/help', '/h']:
+                    self.call_from_thread(self.show_help_screen)
 
-            elif cmd_name in ['/edit-cell', '/ec']:
-                if len(args) < 3:
-                    self.log_error("Usage: /edit-cell <row_idx> <col_name> <new_value>")
-                    return
-                try:
-                    row_idx = int(args[0])
-                except ValueError:
-                    self.log_error("Row index must be an integer.")
-                    return
-                col_name = args[1]
-                new_value = args[2]
-                
-                self.manager.edit_cell(row_idx, col_name, new_value)
-                self.update_table()
-                self.log_success(f"Updated cell ({row_idx}, '{col_name}') to '{new_value}'.")
-                self.log_info(self.manager.get_summary_text())
+                elif cmd_name in ['/load']:
+                    if not args:
+                        self.log_error("Usage: /load <file_path> [sheet_name]")
+                        return
+                    filepath = args[0]
+                    sheet_name = args[1] if len(args) > 1 else None
+                    
+                    self.manager.load_file(filepath, sheet_name)
+                    self.update_table()
+                    self.log_success(f"Successfully loaded '{filepath}'")
+                    self.log_info(self.manager.get_summary_text())
+                    if self.manager.available_sheets:
+                        self.log_info(f"Available Sheets: {', '.join(self.manager.available_sheets)}")
 
-            elif cmd_name in ['/clear-cell', '/cc']:
-                if len(args) < 2:
-                    self.log_error("Usage: /clear-cell <row_idx> <col_name>")
-                    return
-                try:
-                    row_idx = int(args[0])
-                except ValueError:
-                    self.log_error("Row index must be an integer.")
-                    return
-                col_name = args[1]
-                
-                self.manager.clear_cell(row_idx, col_name)
-                self.update_table()
-                self.log_success(f"Cleared cell ({row_idx}, '{col_name}').")
-                self.log_info(self.manager.get_summary_text())
+                elif cmd_name in ['/delete-row', '/dr']:
+                    if not args:
+                        self.log_error("Usage: /delete-row <row_index_number>")
+                        return
+                    try:
+                        row_idx = int(args[0])
+                    except ValueError:
+                        self.log_error("Row index must be an integer.")
+                        return
+                    
+                    self.manager.delete_row(row_idx)
+                    self.update_table()
+                    self.log_success(f"Row {row_idx} deleted.")
+                    self.log_info(self.manager.get_summary_text())
 
-            elif cmd_name in ['/query', '/q']:
-                if not cmd_arg_str:
-                    self.log_error("Usage: /query <pandas_query_string> (e.g. /q Age > 25 and City == 'New York')")
-                    return
-                
-                self.manager.query(cmd_arg_str)
-                self.update_table()
-                self.log_success(f"Query applied: {cmd_arg_str}")
-                self.log_info(self.manager.get_summary_text())
+                elif cmd_name in ['/delete-col', '/dc']:
+                    if not args:
+                        self.log_error("Usage: /delete-col <column_name>")
+                        return
+                    col_name = args[0]
+                    
+                    self.manager.delete_col(col_name)
+                    self.update_table()
+                    self.log_success(f"Column '{col_name}' deleted.")
+                    self.log_info(self.manager.get_summary_text())
 
-            elif cmd_name in ['/sort', '/s']:
-                if not args:
-                    self.log_error("Usage: /sort <column_name> [asc/desc]")
-                    return
-                col_name = args[0]
-                ascending = True
-                if len(args) > 1:
-                    ascending = args[1].lower() not in ['desc', 'false', '0']
-                
-                self.manager.sort(col_name, ascending)
-                self.update_table()
-                order = "ascending" if ascending else "descending"
-                self.log_success(f"Sorted table by '{col_name}' in {order} order.")
-                self.log_info(self.manager.get_summary_text())
+                elif cmd_name in ['/edit-cell', '/ec']:
+                    if len(args) < 3:
+                        self.log_error("Usage: /edit-cell <row_idx> <col_name> <new_value>")
+                        return
+                    try:
+                        row_idx = int(args[0])
+                    except ValueError:
+                        self.log_error("Row index must be an integer.")
+                        return
+                    col_name = args[1]
+                    new_value = args[2]
+                    
+                    self.manager.edit_cell(row_idx, col_name, new_value)
+                    self.update_table()
+                    self.log_success(f"Updated cell ({row_idx}, '{col_name}') to '{new_value}'.")
+                    self.log_info(self.manager.get_summary_text())
 
-            elif cmd_name in ['/undo', '/u']:
-                self.manager.undo()
-                self.update_table()
-                self.log_success("Undid last operation.")
-                self.log_info(self.manager.get_summary_text())
+                elif cmd_name in ['/clear-cell', '/cc']:
+                    if len(args) < 2:
+                        self.log_error("Usage: /clear-cell <row_idx> <col_name>")
+                        return
+                    try:
+                        row_idx = int(args[0])
+                    except ValueError:
+                        self.log_error("Row index must be an integer.")
+                        return
+                    col_name = args[1]
+                    
+                    self.manager.clear_cell(row_idx, col_name)
+                    self.update_table()
+                    self.log_success(f"Cleared cell ({row_idx}, '{col_name}').")
+                    self.log_info(self.manager.get_summary_text())
 
-            elif cmd_name in ['/reset', '/r']:
-                self.manager.reset()
-                self.update_table()
-                self.log_success("Table reset to original state.")
-                self.log_info(self.manager.get_summary_text())
+                elif cmd_name in ['/query', '/q']:
+                    if not cmd_arg_str:
+                        self.log_error("Usage: /query <pandas_query_string> (e.g. /q Age > 25 and City == 'New York')")
+                        return
+                    
+                    self.manager.query(cmd_arg_str)
+                    self.update_table()
+                    self.log_success(f"Query applied: {cmd_arg_str}")
+                    self.log_info(self.manager.get_summary_text())
 
-            elif cmd_name in ['/export-docx', '/docx']:
-                if not args:
-                    self.log_error("Usage: /export-docx <output_filepath>")
-                    return
-                if self.manager.df is None:
-                    self.log_error("Cannot export. No spreadsheet loaded.")
-                    return
-                output_path = args[0]
-                export_to_docx(self.manager.df, output_path)
-                self.log_success(f"Exported to DOCX table successfully at: {output_path}")
+                elif cmd_name in ['/sort', '/s']:
+                    if not args:
+                        self.log_error("Usage: /sort <column_name> [asc/desc]")
+                        return
+                    col_name = args[0]
+                    ascending = True
+                    if len(args) > 1:
+                        ascending = args[1].lower() not in ['desc', 'false', '0']
+                    
+                    self.manager.sort(col_name, ascending)
+                    self.update_table()
+                    order = "ascending" if ascending else "descending"
+                    self.log_success(f"Sorted table by '{col_name}' in {order} order.")
+                    self.log_info(self.manager.get_summary_text())
 
-            elif cmd_name in ['/export-pdf', '/pdf']:
-                if not args:
-                    self.log_error("Usage: /export-pdf <output_filepath>")
-                    return
-                if self.manager.df is None:
-                    self.log_error("Cannot export. No spreadsheet loaded.")
-                    return
-                output_path = args[0]
-                export_to_pdf(self.manager.df, output_path)
-                self.log_success(f"Exported to PDF successfully at: {output_path}")
+                elif cmd_name in ['/undo', '/u']:
+                    self.manager.undo()
+                    self.update_table()
+                    self.log_success("Undid last operation.")
+                    self.log_info(self.manager.get_summary_text())
 
-            elif cmd_name in ['/exit', '/quit']:
-                self.log_info("Exiting application...")
-                self.exit()
+                elif cmd_name in ['/reset', '/r']:
+                    self.manager.reset()
+                    self.update_table()
+                    self.log_success("Table reset to original state.")
+                    self.log_info(self.manager.get_summary_text())
 
-            else:
-                self.log_error(f"Unknown command: '{cmd_name}'. Type /help for a list of valid commands.")
+                elif cmd_name in ['/export-docx', '/docx']:
+                    if not args:
+                        self.log_error("Usage: /export-docx <output_filepath>")
+                        return
+                    if self.manager.df is None:
+                        self.log_error("Cannot export. No spreadsheet loaded.")
+                        return
+                    output_path = args[0]
+                    export_to_docx(self.manager.df, output_path)
+                    self.log_success(f"Exported to DOCX table successfully at: {output_path}")
 
-        except Exception as e:
-            self.log_error(str(e))
+                elif cmd_name in ['/export-pdf', '/pdf']:
+                    if not args:
+                        self.log_error("Usage: /export-pdf <output_filepath>")
+                        return
+                    if self.manager.df is None:
+                        self.log_error("Cannot export. No spreadsheet loaded.")
+                        return
+                    output_path = args[0]
+                    export_to_pdf(self.manager.df, output_path)
+                    self.log_success(f"Exported to PDF successfully at: {output_path}")
+
+                elif cmd_name in ['/exit', '/quit']:
+                    self.log_info("Exiting application...")
+                    self.exit()
+
+                else:
+                    self.log_error(f"Unknown command: '{cmd_name}'. Type /help for a list of valid commands.")
+
+            except Exception as e:
+                self.log_error(str(e))
+        finally:
+            self.call_from_thread(self.hide_loading)
 
     def show_help_screen(self):
         """Outputs the command manual to the console log."""
