@@ -365,6 +365,29 @@ class SpreadsheetApp(App):
                     self.log_success(f"Sorted table by '{col_name}' in {order} order.")
                     self.log_info(self.manager.get_summary_text())
 
+                elif cmd_name in ['/find']:
+                    if not args:
+                        self.log_error("Usage: /find <pattern>")
+                        return
+                    pattern = args[0]
+                    matches = self.manager.find_pattern(pattern)
+                    for r, col, val in matches:
+                        self.log_info(f"Match: Row {r}, Column '{col}': '{val}'")
+                    self.log_success(f"Find finished. Found {len(matches)} matches.")
+
+                elif cmd_name in ['/replace']:
+                    if len(args) < 2:
+                        self.log_error("Usage: /replace <pattern> <replacement> [col_name]")
+                        return
+                    pattern = args[0]
+                    replacement = args[1]
+                    col_name = args[2] if len(args) > 2 else None
+                    
+                    modified = self.manager.find_and_replace(pattern, replacement, col_name)
+                    self.update_table()
+                    self.log_success(f"Replace finished. Modified {modified} cell(s).")
+                    self.log_info(self.manager.get_summary_text())
+
                 elif cmd_name in ['/undo', '/u']:
                     self.manager.undo()
                     self.update_table()
@@ -446,6 +469,12 @@ class SpreadsheetApp(App):
         
         self.log_widget.write("[bold green]/sort <col_name> [asc/desc][/bold green] (or [bold green]/s[/bold green])")
         self.log_widget.write("  Sorts spreadsheet by column. Default order is ascending. Add 'desc' for descending.")
+
+        self.log_widget.write("[bold green]/find <pattern>[/bold green]")
+        self.log_widget.write("  Locates and lists regex matches in the spreadsheet.")
+
+        self.log_widget.write("[bold green]/replace <pattern> <replacement> [col][/bold green]")
+        self.log_widget.write("  Executes a regex find-and-replace on a column (or all columns).")
         
         self.log_widget.write("[bold green]/undo[/bold green] (or [bold green]/u[/bold green] or [bold green]Ctrl+Z[/bold green])")
         self.log_widget.write("  Undoes the last layout/data modification.")

@@ -123,6 +123,28 @@ class TestSpreadsheetManager(unittest.TestCase):
         self.assertNotIn("Salary", self.manager.df.columns)
         self.assertIn("Wage", self.manager.df.columns)
 
+    def test_find_pattern(self):
+        # Find matches for "Alice"
+        matches = self.manager.find_pattern("Alice")
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0][0], 0)
+        self.assertEqual(matches[0][1], "Name")
+
+        # Find matches for numeric pattern
+        matches = self.manager.find_pattern(r"^3\d$") # Matches 30 or 35
+        self.assertEqual(len(matches), 2)
+
+    def test_find_and_replace(self):
+        # Replace "Alice" with "Alicia"
+        modified = self.manager.find_and_replace("Alice", "Alicia")
+        self.assertEqual(modified, 1)
+        self.assertEqual(self.manager.df.iloc[0]["Name"], "Alicia")
+
+        # Regex replace ending 'e' with 'a' in Name column
+        modified = self.manager.find_and_replace("e$", "a", "Name")
+        # Charlie ends with 'e', should become Charlia
+        self.assertEqual(self.manager.df.iloc[2]["Name"], "Charlia")
+
     def test_export_docx(self):
         export_to_docx(self.manager.df, "test_out.docx")
         self.assertTrue(os.path.exists("test_out.docx"))

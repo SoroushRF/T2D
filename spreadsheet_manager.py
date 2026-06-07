@@ -184,6 +184,84 @@ class SpreadsheetManager:
         """Clears (sets to NaN) a specific cell value."""
         self.edit_cell(row_idx, col_name, "nan")
 
+    def find_pattern(self, pattern):
+        """Finds regex matches in the spreadsheet and returns list of (row_idx, col_name, val)."""
+        import re
+        if self.df is None:
+            raise ValueError("No file loaded.")
+        
+        try:
+            regex = re.compile(pattern)
+        except re.error as e:
+            raise ValueError(f"Invalid regex pattern: {e}")
+            
+        matches = []
+        for col in self.df.columns:
+            col_idx = self.df.columns.get_loc(col)
+            for row_idx in range(len(self.df)):
+                val = self.df.iloc[row_idx, col_idx]
+                val_str = "" if pd.isna(val) else str(val)
+                if regex.search(val_str):
+                    matches.append((row_idx, col, val_str))
+        return matches
+
+    def find_and_replace(self, pattern, replacement, col_name=None):
+        """Regex find and replace on the specified column or all columns."""
+        import re
+        if self.df is None:
+            raise ValueError("No file loaded.")
+        
+        cols_to_process = []
+        if col_name:
+            if col_name not in self.df.columns:
+                matching_cols = [col for col in self.df.columns if col.lower() == col_name.lower()]
+                if len(matching_cols) == 1:
+                    col_name = matching_cols[0]
+                else:
+                    raise ValueError(f"Column '{col_name}' not found.")
+            cols_to_process = [col_name]
+        else:
+            cols_to_process = list(self.df.columns)
+            
+        self._save_to_history()
+        
+        try:
+            regex = re.compile(pattern)
+        except re.error as e:
+            self.history.pop()
+            raise ValueError(f"Invalid regex pattern: {e}")
+            
+        cells_modified = 0
+        for col in cols_to_process:
+            col_idx = self.df.columns.get_loc(col)
+            dtype = self.df.dtypes.iloc[col_idx]
+            
+            for row_idx in range(len(self.df)):
+                val = self.df.iloc[row_idx, col_idx]
+                val_str = "" if pd.isna(val) else str(val)
+                
+                if regex.search(val_str):
+                    new_val_str = regex.sub(replacement, val_str)
+                    if new_val_str != val_str:
+                        converted_value = new_val_str
+                        if new_val_str == "" or new_val_str.lower() == "nan" or new_val_str.lower() == "none":
+                            converted_value = np.nan
+                        else:
+                            try:
+                                if pd.api.types.is_integer_dtype(dtype):
+                                    converted_value = int(new_val_str)
+                                elif pd.api.types.is_float_dtype(dtype):
+                                    converted_value = float(new_val_str)
+                                elif pd.api.types.is_bool_dtype(dtype):
+                                    converted_value = new_val_str.lower() in ('true', '1', 'yes', 'y', 't')
+                            except ValueError:
+                                pass
+                        
+                        self.df.iloc[row_idx, col_idx] = converted_value
+                        cells_modified += 1
+                        
+        return cells_modified
+
     def query(self, query_str):
         """Filters the dataframe using a pandas query string."""
         if self.df is None:
