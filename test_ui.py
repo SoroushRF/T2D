@@ -44,3 +44,44 @@ class TestSpreadsheetAppTUI(unittest.IsolatedAsyncioTestCase):
 
             # Verify DataTable has elements
             self.assertGreater(datatable.row_count, 0)
+
+    async def test_cell_edit_via_command(self):
+        app = SpreadsheetApp()
+        async with app.run_test() as pilot:
+            app.execute_command(f"/load {self.test_filename}")
+            await pilot.pause(0.2)
+
+            app.execute_command("/edit-cell 0 Age 26")
+            await pilot.pause(0.2)
+
+            self.assertEqual(app.manager.df.iloc[0]["Age"], 26)
+
+            datatable = app.query_one(DataTable)
+            # Row index is column index 0 (Idx), Name is 1, Age is 2
+            self.assertEqual(datatable.get_cell_at((0, 2)), "26")
+
+    async def test_undo_redo_via_commands_and_keys(self):
+        app = SpreadsheetApp()
+        async with app.run_test() as pilot:
+            app.execute_command(f"/load {self.test_filename}")
+            await pilot.pause(0.2)
+
+            app.execute_command("/edit-cell 0 Age 99")
+            await pilot.pause(0.2)
+            self.assertEqual(app.manager.df.iloc[0]["Age"], 99)
+
+            app.execute_command("/undo")
+            await pilot.pause(0.2)
+            self.assertEqual(app.manager.df.iloc[0]["Age"], 25)
+
+            app.execute_command("/redo")
+            await pilot.pause(0.2)
+            self.assertEqual(app.manager.df.iloc[0]["Age"], 99)
+
+            await pilot.press("ctrl+z")
+            await pilot.pause(0.2)
+            self.assertEqual(app.manager.df.iloc[0]["Age"], 25)
+
+            await pilot.press("ctrl+y")
+            await pilot.pause(0.2)
+            self.assertEqual(app.manager.df.iloc[0]["Age"], 99)
