@@ -68,7 +68,11 @@ class SpreadsheetApp(App):
 
     def update_table(self):
         """Updates the DataTable representation of the spreadsheet thread-safely."""
-        self.call_from_thread(self._update_table_internal)
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            self._update_table_internal()
+        else:
+            self.call_from_thread(self._update_table_internal)
 
     def _update_table_internal(self):
         table = self.query_one(DataTable)
@@ -95,19 +99,39 @@ class SpreadsheetApp(App):
             table.add_row(str(idx), *row)
 
     def log_success(self, msg: str):
-        self.call_from_thread(self.log_widget.write, f"[bold green]✔[/bold green] {msg}")
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            self.log_widget.write(f"[bold green]✔[/bold green] {msg}")
+        else:
+            self.call_from_thread(self.log_widget.write, f"[bold green]✔[/bold green] {msg}")
 
     def log_error(self, msg: str):
-        self.call_from_thread(self.log_widget.write, f"[bold red]✘ Error:[/bold red] [red]{msg}[/red]")
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            self.log_widget.write(f"[bold red]✘ Error:[/bold red] [red]{msg}[/red]")
+        else:
+            self.call_from_thread(self.log_widget.write, f"[bold red]✘ Error:[/bold red] [red]{msg}[/red]")
 
     def log_info(self, msg: str):
-        self.call_from_thread(self.log_widget.write, f"[bold blue]ℹ[/bold blue] {msg}")
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            self.log_widget.write(f"[bold blue]ℹ[/bold blue] {msg}")
+        else:
+            self.call_from_thread(self.log_widget.write, f"[bold blue]ℹ[/bold blue] {msg}")
 
     def show_loading(self) -> None:
-        self.query_one("#loading-overlay").display = True
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            self.query_one("#loading-overlay").display = True
+        else:
+            self.call_from_thread(self.show_loading)
 
     def hide_loading(self) -> None:
-        self.query_one("#loading-overlay").display = False
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            self.query_one("#loading-overlay").display = False
+        else:
+            self.call_from_thread(self.hide_loading)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "load-sample-btn":
@@ -216,6 +240,60 @@ class SpreadsheetApp(App):
                     self.manager.delete_row(row_idx)
                     self.update_table()
                     self.log_success(f"Row {row_idx} deleted.")
+                    self.log_info(self.manager.get_summary_text())
+
+                elif cmd_name in ['/insert-row', '/ir']:
+                    if not args:
+                        self.log_error("Usage: /insert-row <row_idx> [col1=val1 col2=val2 ...]")
+                        return
+                    try:
+                        row_idx = int(args[0])
+                    except ValueError:
+                        self.log_error("Row index must be an integer.")
+                        return
+                    
+                    data_dict = {}
+                    for arg in args[1:]:
+                        if '=' in arg:
+                            k, v = arg.split('=', 1)
+                            if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                                v = v[1:-1]
+                            data_dict[k] = v
+
+                    self.manager.insert_row(row_idx, data_dict)
+                    self.update_table()
+                    self.log_success(f"Row inserted at index {row_idx}.")
+                    self.log_info(self.manager.get_summary_text())
+
+                elif cmd_name in ['/insert-col', '/ic']:
+                    if not args:
+                        self.log_error("Usage: /insert-col <col_name> [default_value] [position]")
+                        return
+                    col_name = args[0]
+                    default_value = args[1] if len(args) > 1 else "nan"
+                    position = None
+                    if len(args) > 2:
+                        try:
+                            position = int(args[2])
+                        except ValueError:
+                            self.log_error("Position must be an integer.")
+                            return
+                    
+                    self.manager.insert_column(col_name, default_value, position)
+                    self.update_table()
+                    self.log_success(f"Column '{col_name}' inserted.")
+                    self.log_info(self.manager.get_summary_text())
+
+                elif cmd_name in ['/rename-col', '/rc']:
+                    if len(args) < 2:
+                        self.log_error("Usage: /rename-col <old_name> <new_name>")
+                        return
+                    old_name = args[0]
+                    new_name = args[1]
+                    
+                    self.manager.rename_column(old_name, new_name)
+                    self.update_table()
+                    self.log_success(f"Column '{old_name}' renamed to '{new_name}'.")
                     self.log_info(self.manager.get_summary_text())
 
                 elif cmd_name in ['/delete-col', '/dc']:
@@ -340,6 +418,15 @@ class SpreadsheetApp(App):
         self.log_widget.write("[bold green]/load <filepath> [sheet][/bold green]")
         self.log_widget.write("  Loads a spreadsheet (.csv, .xlsx, .xls) to the interface.")
         self.log_widget.write("  If an Excel sheet is specified, loads that sheet, otherwise the first.")
+        
+        self.log_widget.write("[bold green]/insert-row <idx> [col1=val1 col2=val2 ...][/bold green] (or [bold green]/ir[/bold green])")
+        self.log_widget.write("  Inserts a new row at the given positional index. Specify values using key=value pairs.")
+        
+        self.log_widget.write("[bold green]/insert-col <col_name> [default_val] [pos][/bold green] (or [bold green]/ic[/bold green])")
+        self.log_widget.write("  Inserts a new column at the specified position (default: end) with a default value.")
+        
+        self.log_widget.write("[bold green]/rename-col <old_name> <new_name>[/bold green] (or [bold green]/rc[/bold green])")
+        self.log_widget.write("  Renames an existing column to new_name.")
         
         self.log_widget.write("[bold green]/delete-row <index>[/bold green] (or [bold green]/dr[/bold green])")
         self.log_widget.write("  Deletes the row at the given positional index (shown in 'Idx' column).")

@@ -64,6 +64,57 @@ class SpreadsheetManager:
         self._save_to_history()
         self.df = self.original_df.copy()
 
+    def insert_row(self, row_idx, data_dict=None):
+        """Inserts a row at the given 0-based positional index."""
+        if self.df is None:
+            raise ValueError("No file loaded.")
+        if row_idx < 0 or row_idx > len(self.df):
+            raise IndexError(f"Row index {row_idx} is out of bounds (0 to {len(self.df)}).")
+        
+        self._save_to_history()
+        new_row_data = {col: np.nan for col in self.df.columns}
+        if data_dict:
+            for k, v in data_dict.items():
+                if k in new_row_data:
+                    new_row_data[k] = v
+        new_row_df = pd.DataFrame([new_row_data])
+        
+        df_top = self.df.iloc[:row_idx]
+        df_bottom = self.df.iloc[row_idx:]
+        self.df = pd.concat([df_top, new_row_df, df_bottom]).reset_index(drop=True)
+
+    def insert_column(self, col_name, default_value=np.nan, position=None):
+        """Inserts a new column at the specified position."""
+        if self.df is None:
+            raise ValueError("No file loaded.")
+        if col_name in self.df.columns:
+            raise ValueError(f"Column '{col_name}' already exists.")
+        
+        self._save_to_history()
+        if position is None:
+            position = len(self.df.columns)
+        elif position < 0 or position > len(self.df.columns):
+            raise IndexError(f"Position {position} is out of bounds (0 to {len(self.df.columns)}).")
+            
+        self.df.insert(loc=position, column=col_name, value=default_value)
+
+    def rename_column(self, old_name, new_name):
+        """Renames a column, checking for name clashes."""
+        if self.df is None:
+            raise ValueError("No file loaded.")
+        if old_name not in self.df.columns:
+            matching_cols = [col for col in self.df.columns if col.lower() == old_name.lower()]
+            if len(matching_cols) == 1:
+                old_name = matching_cols[0]
+            else:
+                raise ValueError(f"Column '{old_name}' not found.")
+        
+        if new_name in self.df.columns:
+            raise ValueError(f"Column '{new_name}' already exists.")
+            
+        self._save_to_history()
+        self.df = self.df.rename(columns={old_name: new_name})
+
     def delete_row(self, row_idx):
         """Deletes a row by its positional 0-based index."""
         if self.df is None:

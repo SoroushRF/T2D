@@ -103,6 +103,26 @@ class TestSpreadsheetManager(unittest.TestCase):
         self.assertEqual(len(self.manager.df), 3)
         self.assertIn("Salary", self.manager.df.columns)
 
+    def test_insert_row(self):
+        # Insert a row at index 1
+        self.manager.insert_row(1, {"Name": "David", "Age": 28, "Salary": 55000.0, "Active": True})
+        self.assertEqual(len(self.manager.df), 4)
+        self.assertEqual(self.manager.df.iloc[1]["Name"], "David")
+        self.assertEqual(self.manager.df.iloc[2]["Name"], "Bob")
+
+    def test_insert_column(self):
+        # Insert a column at index 1
+        self.manager.insert_column("Role", "Engineer", 1)
+        self.assertIn("Role", self.manager.df.columns)
+        self.assertEqual(self.manager.df.iloc[0]["Role"], "Engineer")
+        self.assertEqual(self.manager.get_headers()[1], "Role")
+
+    def test_rename_column(self):
+        # Rename "Salary" to "Wage"
+        self.manager.rename_column("Salary", "Wage")
+        self.assertNotIn("Salary", self.manager.df.columns)
+        self.assertIn("Wage", self.manager.df.columns)
+
     def test_export_docx(self):
         export_to_docx(self.manager.df, "test_out.docx")
         self.assertTrue(os.path.exists("test_out.docx"))
