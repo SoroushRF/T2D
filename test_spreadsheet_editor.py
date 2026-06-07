@@ -94,6 +94,22 @@ class TestSpreadsheetManager(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.manager.undo()
 
+    def test_redo(self):
+        # Modify and then undo/redo
+        self.manager.edit_cell(0, "Age", "99")
+        self.assertEqual(self.manager.df.iloc[0]["Age"], 99)
+
+        self.manager.undo()
+        self.assertEqual(self.manager.df.iloc[0]["Age"], 25)
+
+        self.manager.redo()
+        self.assertEqual(self.manager.df.iloc[0]["Age"], 99)
+
+        # Test empty redo stack on new operation
+        self.manager.edit_cell(0, "Age", "88")
+        with self.assertRaises(ValueError):
+            self.manager.redo()
+
     def test_reset(self):
         self.manager.delete_row(0)
         self.manager.delete_col("Salary")

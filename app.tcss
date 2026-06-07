@@ -19,6 +19,7 @@ $cmd: #a78bfa;
 Screen {
     background: $bg-primary;
     color: $text-primary;
+    layers: default loading;
 }
 
 Header {
@@ -68,9 +69,10 @@ DataTable > .datatable--header {
 
 /* Cursor highlighting in DataTable */
 DataTable > .datatable--cursor {
-    background: $accent-neon;
-    color: $bg-primary;
+    background: rgba(0, 229, 255, 0.3);
+    color: $text-light;
     text-style: bold;
+    border: tall $accent-neon;
 }
 
 /* Alternate row styling */
@@ -176,4 +178,22 @@ RichLog {
 #load-sample-btn:hover {
     background: $accent-neon;
     color: $bg-primary;
+}
+
+#loading-overlay {
+    background: rgba(18, 18, 20, 0.8);
+    align: center middle;
+    width: 100%;
+    height: 100%;
+    display: none;
+    layer: loading;
+}
+
+#history-status {
+    background: $bg-secondary;
+    color: $text-secondary;
+    height: 1;
+    text-align: right;
+    padding: 0 3 0 0;
+    width: 100%;
 }

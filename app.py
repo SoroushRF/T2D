@@ -22,6 +22,7 @@ class SpreadsheetApp(App):
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+z", "trigger_undo", "Undo", show=True),
+        Binding("ctrl+y", "trigger_redo", "Redo", show=True),
         Binding("ctrl+l", "clear_logs", "Clear Logs", show=True),
         Binding("f1", "show_help", "Help", show=True),
     ]
@@ -43,6 +44,7 @@ class SpreadsheetApp(App):
             with Container(id="input-container"):
                 yield Label(" / ", id="prompt-label")
                 yield Input(placeholder="Type a slash command here... (e.g. /load sales.csv, /help)", id="command-input")
+            yield Label("[U] Undo (0)  |  [R] Redo (0)", id="history-status")
         yield Container(LoadingIndicator(), id="loading-overlay")
         yield Footer()
 
@@ -78,6 +80,8 @@ class SpreadsheetApp(App):
         table = self.query_one(DataTable)
         empty_panel = self.query_one(EmptyStatePanel)
         
+        self.update_history_status()
+        
         if self.manager.df is None:
             table.display = False
             empty_panel.display = True
@@ -97,6 +101,19 @@ class SpreadsheetApp(App):
 
         for idx, row in enumerate(rows):
             table.add_row(str(idx), *row)
+
+    def update_history_status(self):
+        try:
+            label = self.query_one("#history-status")
+            u_size = len(self.manager.undo_stack)
+            r_size = len(self.manager.redo_stack)
+            
+            u_badge = f"[bold #00e5ff][U] Undo ({u_size})[/bold #00e5ff]" if u_size > 0 else "[#4a5568][U] Undo (0)[/#4a5568]"
+            r_badge = f"[bold #00e5ff][R] Redo ({r_size})[/bold #00e5ff]" if r_size > 0 else "[#4a5568][R] Redo (0)[/#4a5568]"
+            
+            label.update(f"{u_badge}  |  {r_badge}")
+        except Exception:
+            pass
 
     def log_success(self, msg: str):
         import threading
@@ -139,6 +156,9 @@ class SpreadsheetApp(App):
 
     def action_trigger_undo(self) -> None:
         self.execute_command("/undo")
+
+    def action_trigger_redo(self) -> None:
+        self.execute_command("/redo")
 
     def action_clear_logs(self) -> None:
         self.log_widget.clear()
@@ -398,6 +418,12 @@ class SpreadsheetApp(App):
                     self.manager.undo()
                     self.update_table()
                     self.log_success("Undid last operation.")
+                    self.log_info(self.manager.get_summary_text())
+
+                elif cmd_name in ['/redo']:
+                    self.manager.redo()
+                    self.update_table()
+                    self.log_success("Redid last operation.")
                     self.log_info(self.manager.get_summary_text())
 
                 elif cmd_name in ['/reset', '/r']:

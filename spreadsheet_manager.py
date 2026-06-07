@@ -2,12 +2,61 @@ import os
 import pandas as pd
 import numpy as np
 
+class DataFramePatch:
+    def __init__(self, df_before, df_after):
+        self.type = 'full'
+        self.data = None
+        
+        # If shape is the same and columns match, store cell-level diff
+        if df_before.shape == df_after.shape and list(df_before.columns) == list(df_after.columns):
+            self.type = 'cell_diff'
+            # Find all elements that differ, handling NaN comparisons
+            diff_mask = (df_before != df_after) & ~(df_before.isna() & df_after.isna())
+            diff_indices = np.where(diff_mask)
+            self.data = []
+            for r, c in zip(diff_indices[0], diff_indices[1]):
+                self.data.append((int(r), int(c), df_before.iloc[r, c]))
+        # If a row was deleted (shape is df_before.shape[0] - 1)
+        elif df_before.shape[0] == df_after.shape[0] + 1 and list(df_before.columns) == list(df_after.columns):
+            self.type = 'row_deleted'
+            mismatch_idx = None
+            for i in range(len(df_after)):
+                if not df_before.iloc[i].equals(df_after.iloc[i]):
+                    mismatch_idx = i
+                    break
+            if mismatch_idx is None:
+                mismatch_idx = len(df_after)
+            self.data = (mismatch_idx, df_before.iloc[mismatch_idx].copy())
+        else:
+            # Fallback to full copy
+            self.type = 'full'
+            self.data = df_before.copy()
+
+    def apply(self, df_current):
+        if self.type == 'full':
+            return self.data.copy()
+        elif self.type == 'cell_diff':
+            df_new = df_current.copy()
+            for r, c, val in self.data:
+                df_new.iloc[r, c] = val
+            return df_new
+        elif self.type == 'row_deleted':
+            df_new = df_current.copy()
+            row_idx, row_series = self.data
+            df_top = df_new.iloc[:row_idx]
+            df_bottom = df_new.iloc[row_idx:]
+            new_row_df = pd.DataFrame([row_series])
+            return pd.concat([df_top, new_row_df, df_bottom]).reset_index(drop=True)
+        return df_current
+
 class SpreadsheetManager:
     def __init__(self):
         self.filepath = None
         self.df = None
         self.original_df = None
-        self.history = []  # Stack of (df_copy) for undo operations
+        self.undo_stack = []
+        self.redo_stack = []
+        self._df_before_change = None
         self.sheet_name = None
         self.available_sheets = []
         self.nan_placeholder = ""
@@ -52,28 +101,55 @@ class SpreadsheetManager:
 
         # Save original copy for resets
         self.original_df = self.df.copy()
-        self.history = []
+        self.undo_stack = []
+        self.redo_stack = []
 
-    def _save_to_history(self):
-        """Pushes a copy of the current dataframe to history stack."""
+    def _prepare_change(self):
+        """Saves a copy of the dataframe before a change to compute patch later."""
         if self.df is not None:
-            self.history.append(self.df.copy())
-            # Limit history size to 50 items to prevent memory issues
-            if len(self.history) > 50:
-                self.history.pop(0)
+            self._df_before_change = self.df.copy()
+
+    def _commit_change(self):
+        """Computes the patch for the change and saves it to undo_stack, clearing redo_stack."""
+        if self._df_before_change is not None and self.df is not None:
+            patch = DataFramePatch(self._df_before_change, self.df)
+            self.undo_stack.append(patch)
+            self.redo_stack.clear()
+            if len(self.undo_stack) > 50:
+                self.undo_stack.pop(0)
+            self._df_before_change = None
 
     def undo(self):
         """Restores the last state from history."""
-        if not self.history:
+        if not self.undo_stack:
             raise ValueError("Nothing to undo.")
-        self.df = self.history.pop()
+        patch = self.undo_stack.pop()
+        df_before = patch.apply(self.df)
+        
+        # Create redo patch
+        redo_patch = DataFramePatch(self.df, df_before)
+        self.redo_stack.append(redo_patch)
+        self.df = df_before
+
+    def redo(self):
+        """Reapplies the last undone operation."""
+        if not self.redo_stack:
+            raise ValueError("Nothing to redo.")
+        patch = self.redo_stack.pop()
+        df_after = patch.apply(self.df)
+        
+        # Create undo patch
+        undo_patch = DataFramePatch(self.df, df_after)
+        self.undo_stack.append(undo_patch)
+        self.df = df_after
 
     def reset(self):
         """Resets the dataframe to its original loaded state."""
         if self.original_df is None:
             raise ValueError("No file loaded.")
-        self._save_to_history()
+        self._prepare_change()
         self.df = self.original_df.copy()
+        self._commit_change()
 
     def insert_row(self, row_idx, data_dict=None):
         """Inserts a row at the given 0-based positional index."""
@@ -82,7 +158,7 @@ class SpreadsheetManager:
         if row_idx < 0 or row_idx > len(self.df):
             raise IndexError(f"Row index {row_idx} is out of bounds (0 to {len(self.df)}).")
         
-        self._save_to_history()
+        self._prepare_change()
         new_row_data = {col: np.nan for col in self.df.columns}
         if data_dict:
             for k, v in data_dict.items():
@@ -93,6 +169,7 @@ class SpreadsheetManager:
         df_top = self.df.iloc[:row_idx]
         df_bottom = self.df.iloc[row_idx:]
         self.df = pd.concat([df_top, new_row_df, df_bottom]).reset_index(drop=True)
+        self._commit_change()
 
     def insert_column(self, col_name, default_value=np.nan, position=None):
         """Inserts a new column at the specified position."""
@@ -101,13 +178,14 @@ class SpreadsheetManager:
         if col_name in self.df.columns:
             raise ValueError(f"Column '{col_name}' already exists.")
         
-        self._save_to_history()
+        self._prepare_change()
         if position is None:
             position = len(self.df.columns)
         elif position < 0 or position > len(self.df.columns):
             raise IndexError(f"Position {position} is out of bounds (0 to {len(self.df.columns)}).")
             
         self.df.insert(loc=position, column=col_name, value=default_value)
+        self._commit_change()
 
     def rename_column(self, old_name, new_name):
         """Renames a column, checking for name clashes."""
@@ -123,8 +201,9 @@ class SpreadsheetManager:
         if new_name in self.df.columns:
             raise ValueError(f"Column '{new_name}' already exists.")
             
-        self._save_to_history()
+        self._prepare_change()
         self.df = self.df.rename(columns={old_name: new_name})
+        self._commit_change()
 
     def delete_row(self, row_idx):
         """Deletes a row by its positional 0-based index."""
@@ -132,11 +211,12 @@ class SpreadsheetManager:
             raise ValueError("No file loaded.")
         if row_idx < 0 or row_idx >= len(self.df):
             raise IndexError(f"Row index {row_idx} is out of bounds (0 to {len(self.df) - 1}).")
-
-        self._save_to_history()
+ 
+        self._prepare_change()
         # Drop by positional index
         self.df = self.df.drop(self.df.index[row_idx]).reset_index(drop=True)
-
+        self._commit_change()
+ 
     def delete_col(self, col_name):
         """Deletes a column by name."""
         if self.df is None:
@@ -150,9 +230,10 @@ class SpreadsheetManager:
                 col_name = matching_cols[0]
             else:
                 raise ValueError(f"Column '{col_name}' not found. Available columns: {', '.join(self.df.columns)}")
-
-        self._save_to_history()
+ 
+        self._prepare_change()
         self.df = self.df.drop(columns=[col_name])
+        self._commit_change()
 
     def edit_cell(self, row_idx, col_name, new_value):
         """Edits a specific cell value at 0-based row index and column name."""
@@ -167,8 +248,8 @@ class SpreadsheetManager:
                 col_name = matching_cols[0]
             else:
                 raise ValueError(f"Column '{col_name}' not found. Available columns: {', '.join(self.df.columns)}")
-
-        self._save_to_history()
+ 
+        self._prepare_change()
         
         # Type conversion and validation
         col_idx = self.df.columns.get_loc(col_name)
@@ -181,13 +262,13 @@ class SpreadsheetManager:
                 try:
                     converted_value = int(new_value)
                 except ValueError:
-                    self.history.pop()
+                    self._df_before_change = None
                     raise ValueError(f"Value '{new_value}' is not a valid integer for column '{col_name}'.")
             elif pd.api.types.is_float_dtype(dtype):
                 try:
                     converted_value = float(new_value)
                 except ValueError:
-                    self.history.pop()
+                    self._df_before_change = None
                     raise ValueError(f"Value '{new_value}' is not a valid float for column '{col_name}'.")
             elif pd.api.types.is_bool_dtype(dtype):
                 val_lower = new_value.lower()
@@ -196,13 +277,13 @@ class SpreadsheetManager:
                 elif val_lower in ('false', '0', 'no', 'n', 'f'):
                     converted_value = False
                 else:
-                    self.history.pop()
+                    self._df_before_change = None
                     raise ValueError(f"Value '{new_value}' is not a valid boolean for column '{col_name}'. Expected true/false, yes/no, 1/0.")
             elif pd.api.types.is_datetime64_any_dtype(dtype):
                 try:
                     converted_value = pd.to_datetime(new_value, format='mixed')
                 except Exception:
-                    self.history.pop()
+                    self._df_before_change = None
                     raise ValueError(f"Value '{new_value}' is not a valid date/time for column '{col_name}'.")
             else:
                 converted_value = new_value
@@ -212,8 +293,9 @@ class SpreadsheetManager:
                         converted_value = pd.to_datetime(new_value, format='mixed')
                     except Exception:
                         pass
-
+ 
         self.df.iloc[row_idx, col_idx] = converted_value
+        self._commit_change()
 
     def clear_cell(self, row_idx, col_name):
         """Clears (sets to NaN) a specific cell value."""
@@ -258,12 +340,12 @@ class SpreadsheetManager:
         else:
             cols_to_process = list(self.df.columns)
             
-        self._save_to_history()
+        self._prepare_change()
         
         try:
             regex = re.compile(pattern)
         except re.error as e:
-            self.history.pop()
+            self._df_before_change = None
             raise ValueError(f"Invalid regex pattern: {e}")
             
         cells_modified = 0
@@ -295,6 +377,7 @@ class SpreadsheetManager:
                         self.df.iloc[row_idx, col_idx] = converted_value
                         cells_modified += 1
                         
+        self._commit_change()
         return cells_modified
 
     def query(self, query_str):
@@ -302,14 +385,15 @@ class SpreadsheetManager:
         if self.df is None:
             raise ValueError("No file loaded.")
         
-        self._save_to_history()
+        self._prepare_change()
         try:
             # We filter and keep the matching rows, reset index to maintain positional logic
             filtered_df = self.df.query(query_str)
             self.df = filtered_df.reset_index(drop=True)
+            self._commit_change()
         except Exception as e:
             # Revert history since the query failed and didn't apply
-            self.history.pop()
+            self._df_before_change = None
             raise ValueError(f"Invalid query: {e}")
 
     def sort(self, col_name, ascending=True):
@@ -324,8 +408,9 @@ class SpreadsheetManager:
             else:
                 raise ValueError(f"Column '{col_name}' not found. Available columns: {', '.join(self.df.columns)}")
 
-        self._save_to_history()
+        self._prepare_change()
         self.df = self.df.sort_values(by=col_name, ascending=ascending).reset_index(drop=True)
+        self._commit_change()
 
     def get_headers(self):
         """Returns list of column names."""
