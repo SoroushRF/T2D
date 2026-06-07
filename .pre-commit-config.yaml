@@ -18,7 +18,7 @@ repos:
     hooks:
       - id: run-tests
         name: Run Unit Tests
-        entry: .venv/Scripts/python.exe -m unittest test_spreadsheet_editor.py test_ui.py
+        entry: .venv/Scripts/python.exe -m unittest test_spreadsheet_editor.py test_ui.py test_command_parser.py
         language: system
         pass_filenames: false
         always_run: true

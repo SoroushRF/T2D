@@ -36,4 +36,4 @@ jobs:
         run: ruff format --check .
 
       - name: Run Unit Tests
-        run: python -m unittest test_spreadsheet_editor.py test_ui.py
+        run: python -m unittest test_spreadsheet_editor.py test_ui.py test_command_parser.py
