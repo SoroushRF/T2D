@@ -214,6 +214,59 @@ class TestSpreadsheetManager(unittest.TestCase):
         export_to_pdf(self.manager.df, "test_out.pdf")
         self.assertTrue(os.path.exists("test_out.pdf"))
 
+    def test_load_completely_empty_csv(self):
+        empty_filename = "empty_test.csv"
+        with open(empty_filename, "w") as f:
+            f.write("")
+        try:
+            m = SpreadsheetManager()
+            with self.assertRaises(ValueError):
+                m.load_file(empty_filename)
+        finally:
+            if os.path.exists(empty_filename):
+                os.remove(empty_filename)
+
+    def test_load_headers_only_csv(self):
+        headers_filename = "headers_only_test.csv"
+        with open(headers_filename, "w") as f:
+            f.write("A,B,C\n")
+        try:
+            m = SpreadsheetManager()
+            m.load_file(headers_filename)
+            self.assertEqual(len(m.df), 0)
+            self.assertListEqual(m.get_headers(), ["A", "B", "C"])
+        finally:
+            if os.path.exists(headers_filename):
+                os.remove(headers_filename)
+
+    def test_duplicate_headers(self):
+        dup_filename = "dup_headers.csv"
+        with open(dup_filename, "w") as f:
+            f.write("Name,Name,Age\nAlice,Bob,25\n")
+        try:
+            m = SpreadsheetManager()
+            m.load_file(dup_filename)
+            self.assertEqual(len(m.get_headers()), 3)
+            self.assertIn("Name", m.get_headers())
+            self.assertIn("Name.1", m.get_headers())
+        finally:
+            if os.path.exists(dup_filename):
+                os.remove(dup_filename)
+
+    def test_out_of_bounds_indices(self):
+        with self.assertRaises(IndexError):
+            self.manager.edit_cell(10, "Name", "New Name")
+        with self.assertRaises(IndexError):
+            self.manager.edit_cell(-1, "Name", "New Name")
+        with self.assertRaises(ValueError):
+            self.manager.edit_cell(0, "NonExistentCol", "Val")
+
+    def test_empty_query(self):
+        with self.assertRaises(ValueError):
+            self.manager.query("")
+        with self.assertRaises(ValueError):
+            self.manager.query("   ")
+
 
 if __name__ == "__main__":
     unittest.main()
