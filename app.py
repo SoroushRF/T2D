@@ -1,6 +1,7 @@
 import os
 import shlex
 import sys
+from typing import List, Dict, Tuple, Optional
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, DataTable, RichLog, Label, Button, Static, LoadingIndicator
 from textual.containers import Container, Vertical, Horizontal
@@ -9,6 +10,7 @@ from textual import work
 
 from spreadsheet_manager import SpreadsheetManager
 from document_generator import export_to_docx, export_to_pdf
+from command_parser import parse_command
 
 class EmptyStatePanel(Container):
     def compose(self) -> ComposeResult:
@@ -209,26 +211,13 @@ class SpreadsheetApp(App):
             # Print command to log
             self.call_from_thread(self.log_widget.write, f"[cmd]> {raw_command}[/cmd]")
 
-            if not raw_command.startswith('/'):
-                self.log_error("Commands must start with '/'. Type /help for usage instructions.")
+            try:
+                cmd_name, args, cmd_arg_str = parse_command(raw_command)
+            except ValueError as e:
+                self.log_error(str(e))
                 return
 
-            # Special query handling: query expression might have unescaped quotes or symbols
-            # that shlex.split might struggle with or parse awkwardly.
-            parts = raw_command.split(None, 1)
-            cmd_name = parts[0].lower()
-            cmd_arg_str = parts[1] if len(parts) > 1 else ""
-
             try:
-                # Parse commands with standard arguments using shlex
-                args = []
-                if cmd_arg_str and cmd_name not in ['/query', '/q']:
-                    try:
-                        args = shlex.split(cmd_arg_str)
-                    except ValueError as e:
-                        self.log_error(f"Command parsing error: {e}. Check your quotes.")
-                        return
-
                 # Route commands
                 if cmd_name in ['/help', '/h']:
                     self.call_from_thread(self.show_help_screen)
