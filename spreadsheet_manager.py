@@ -470,3 +470,32 @@ class SpreadsheetManager:
             msg += f" | Sheet: {self.sheet_name}"
         msg += f" | Shape: {num_rows} rows x {num_cols} columns | Undo stack: {undo_avail}"
         return msg
+
+    def export_csv(self, filepath: str) -> None:
+        """Saves the current DataFrame to a CSV file."""
+        if self.df is None:
+            raise ValueError("No spreadsheet loaded. Please load a file first.")
+        self.df.to_csv(filepath, index=False)
+
+    def export_excel(self, filepath: str, sheet_name: str = "Sheet1") -> None:
+        """Saves the current DataFrame to an Excel file, auto-fitting column widths."""
+        if self.df is None:
+            raise ValueError("No spreadsheet loaded. Please load a file first.")
+
+        # Preserve the original sheet name if it exists
+        s_name = sheet_name
+        if hasattr(self, "sheet_name") and self.sheet_name:
+            s_name = self.sheet_name
+
+        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+            self.df.to_excel(writer, sheet_name=s_name, index=False)
+
+            # Auto-fit column widths in the Excel sheet
+            worksheet = writer.sheets[s_name]
+            for col in worksheet.columns:
+                max_len = max(len(str(cell.value or "")) for cell in col)
+                # Avoid openpyxl indexing issues by getting column letter
+                from openpyxl.utils import get_column_letter
+
+                col_letter = get_column_letter(col[0].column)
+                worksheet.column_dimensions[col_letter].width = max(max_len + 3, 10)

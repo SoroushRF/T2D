@@ -442,16 +442,82 @@ class SpreadsheetApp(App):
                     export_to_docx(self.manager.df, output_path)
                     self.log_success(f"Exported to DOCX table successfully at: {output_path}")
 
-                elif cmd_name in ["/export-pdf", "/pdf"]:
+                elif cmd_name in ["/export-csv", "/csv"]:
                     if not args:
-                        self.log_error("Usage: /export-pdf <output_filepath>")
+                        self.log_error("Usage: /export-csv <output_filepath>")
                         return
                     if self.manager.df is None:
                         self.log_error("Cannot export. No spreadsheet loaded.")
                         return
                     output_path = args[0]
-                    export_to_pdf(self.manager.df, output_path)
-                    self.log_success(f"Exported to PDF successfully at: {output_path}")
+                    self.manager.export_csv(output_path)
+                    self.log_success(f"Exported to CSV successfully at: {output_path}")
+
+                elif cmd_name in ["/export-excel", "/excel"]:
+                    if not args:
+                        self.log_error("Usage: /export-excel <output_filepath> [sheet_name]")
+                        return
+                    if self.manager.df is None:
+                        self.log_error("Cannot export. No spreadsheet loaded.")
+                        return
+                    output_path = args[0]
+                    sheet_name = args[1] if len(args) > 1 else "Sheet1"
+                    self.manager.export_excel(output_path, sheet_name=sheet_name)
+                    self.log_success(f"Exported to Excel successfully at: {output_path}")
+
+                elif cmd_name in ["/export-pdf", "/pdf"]:
+                    if not args:
+                        self.log_error(
+                            "Usage: /export-pdf <output_filepath> [orientation=P/L] "
+                            "[paper_size=A4/Letter/Legal] [title=...] [margin=...]"
+                        )
+                        return
+                    if self.manager.df is None:
+                        self.log_error("Cannot export. No spreadsheet loaded.")
+                        return
+
+                    output_path = args[0]
+                    orientation = None
+                    paper_size = "A4"
+                    title = "Spreadsheet Export"
+                    margin = 10
+
+                    # Parse optional arguments (key=value or positional)
+                    for arg in args[1:]:
+                        if "=" in arg:
+                            k, v = arg.split("=", 1)
+                            k = k.lower().strip()
+                            v = v.strip()
+                            if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                                v = v[1:-1]
+                            if k in ["orientation", "o"]:
+                                orientation = v.upper()
+                            elif k in ["paper_size", "p"]:
+                                paper_size = v.upper()
+                            elif k in ["title", "t"]:
+                                title = v
+                            elif k in ["margin", "m"]:
+                                try:
+                                    margin = int(v)
+                                except ValueError:
+                                    self.log_error(f"Invalid margin value: {v}. Using default.")
+                        else:
+                            if arg.upper() in ["P", "L"]:
+                                orientation = arg.upper()
+                            elif arg.upper() in ["A4", "LETTER", "LEGAL"]:
+                                paper_size = arg.upper()
+                            else:
+                                title = arg
+
+                    actual_output_path = export_to_pdf(
+                        self.manager.df,
+                        output_path,
+                        title=title,
+                        orientation=orientation,
+                        paper_size=paper_size,
+                        margin=margin,
+                    )
+                    self.log_success(f"Exported to PDF successfully at: {actual_output_path}")
 
                 elif cmd_name in ["/exit", "/quit"]:
                     self.log_info("Exiting application...")
@@ -538,6 +604,14 @@ class SpreadsheetApp(App):
 
         self.log_widget.write("[bold green]/export-pdf <output_path>[/bold green] (or [bold green]/pdf[/bold green])")
         self.log_widget.write("  Exports the current view to a styled PDF file.")
+
+        self.log_widget.write("[bold green]/export-csv <output_path>[/bold green] (or [bold green]/csv[/bold green])")
+        self.log_widget.write("  Exports the current view to a CSV file.")
+
+        self.log_widget.write(
+            "[bold green]/export-excel <output_path> [sheet_name][/bold green] (or [bold green]/excel[/bold green])"
+        )
+        self.log_widget.write("  Exports the current view to an Excel file, auto-fitting column widths.")
 
         self.log_widget.write(
             "[bold green]/help[/bold green] (or [bold green]/h[/bold green] or [bold green]F1[/bold green])"

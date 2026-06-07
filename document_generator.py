@@ -108,33 +108,73 @@ def export_to_docx(df, output_path, title="Spreadsheet Export"):
 
 
 class StyledPDF(FPDF):
-    def __init__(self, title_text, *args, **kwargs):
+    def __init__(self, title_text, filename="", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.title_text = title_text
+        self.filename = filename
+        from datetime import datetime
+
+        self.gen_date = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     def header(self):
-        self.set_font("helvetica", "B", 14)
+        self.set_font("helvetica", "B", 11)
         self.set_text_color(45, 55, 72)
-        self.cell(0, 10, self.title_text, align="C", new_x="LMARGIN", new_y="NEXT")
+        # Title of the export
+        self.cell(0, 8, self.title_text, align="L")
+
+        # Reset x position to print right-aligned text on the same line
+        self.set_x(self.l_margin)
+
+        # Right-aligned filename and date
+        self.set_font("helvetica", "I", 8)
+        self.set_text_color(113, 128, 150)
+        file_info = f"File: {self.filename}  |  Generated: {self.gen_date}"
+        self.cell(0, 8, file_info, align="R", new_x="LMARGIN", new_y="NEXT")
+
         self.set_draw_color(226, 232, 240)
-        self.line(10, self.get_y(), self.w - 10, self.get_y())
-        self.ln(5)
+        self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+        self.ln(4)
 
     def footer(self):
         self.set_y(-15)
         self.set_font("helvetica", "I", 8)
         self.set_text_color(160, 174, 192)
-        self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
+        total_pages = self.pages_count if hasattr(self, "pages_count") else "{nb}"
+        self.cell(0, 10, f"Page {self.page_no()} of {total_pages}", align="C")
 
 
-def export_to_pdf(df, output_path, title="Spreadsheet Export"):
-    """Exports a pandas DataFrame to a styled PDF document."""
-    # Determine page orientation based on column count to prevent overflow
-    num_cols = len(df.columns)
-    orientation = "L" if num_cols > 6 else "P"
+def export_to_pdf(
+    df,
+    output_path,
+    title="Spreadsheet Export",
+    orientation=None,
+    paper_size="A4",
+    margin=10,
+    filename_template=None,
+):
+    """Exports a pandas DataFrame to a styled PDF document with layout controls."""
+    import os
+    from datetime import datetime
 
-    pdf = StyledPDF(title_text=title, orientation=orientation, unit="mm", format="A4")
+    # Handle filename formatting templates
+    if filename_template or "{" in output_path:
+        template = filename_template or output_path
+        now = datetime.now()
+        output_path = template.format(
+            date=now.strftime("%Y-%m-%d"),
+            datetime=now.strftime("%Y%m%d_%H%M%S"),
+            title=title.replace(" ", "_"),
+        )
+
+    # Determine default page orientation based on column count if not specified
+    if not orientation:
+        num_cols = len(df.columns)
+        orientation = "L" if num_cols > 6 else "P"
+
+    filename = os.path.basename(output_path)
+    pdf = StyledPDF(title_text=title, filename=filename, orientation=orientation, unit="mm", format=paper_size)
     pdf.alias_nb_pages()
+    pdf.set_margins(left=margin, top=margin, right=margin)
     pdf.add_page()
 
     # Subtitle with data metadata
@@ -143,11 +183,11 @@ def export_to_pdf(df, output_path, title="Spreadsheet Export"):
     pdf.cell(
         0,
         6,
-        f"Shape: {df.shape[0]} rows x {df.shape[1]} columns. Generated via Spreadsheet Editor.",
+        f"Shape: {df.shape[0]} rows x {df.shape[1]} columns. Generated via T2D Spreadsheet Editor.",
         new_x="LMARGIN",
         new_y="NEXT",
     )
-    pdf.ln(4)
+    pdf.ln(3)
 
     # Style configuration
     pdf.set_font("helvetica", size=9)
@@ -167,9 +207,24 @@ def export_to_pdf(df, output_path, title="Spreadsheet Export"):
                     row_str.append(str(val))
         rows.append(row_str)
 
+    # Adaptive column width fitting algorithm
+    col_max_lens = [len(str(h)) for h in headers]
+    for r in rows:
+        for i, val in enumerate(r):
+            if i < len(col_max_lens):
+                col_max_lens[i] = max(col_max_lens[i], len(str(val)))
+
+    total_len = sum(col_max_lens)
+    if total_len > 0:
+        # Scale to 100% of usable page width
+        usable_width = pdf.w - pdf.l_margin - pdf.r_margin
+        col_widths = [max(12, int((col_len / total_len) * usable_width)) for col_len in col_max_lens]
+    else:
+        col_widths = None
+
     # Draw table using fpdf2 table feature
     with pdf.table(
-        col_widths=None,
+        col_widths=col_widths,
         text_align="LEFT",
         line_height=6,
         cell_fill_color=(247, 250, 252),
@@ -200,3 +255,4 @@ def export_to_pdf(df, output_path, title="Spreadsheet Export"):
                 data_row.cell(val, align=align)
 
     pdf.output(output_path)
+    return output_path

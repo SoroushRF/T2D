@@ -25,7 +25,17 @@ class TestSpreadsheetManager(unittest.TestCase):
         if os.path.exists(self.test_filename):
             os.remove(self.test_filename)
         # Clean up exported test files if any
-        for f in ["test_out.docx", "test_out.pdf"]:
+        from datetime import datetime
+
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        for f in [
+            "test_out.docx",
+            "test_out.pdf",
+            "test_out.csv",
+            "test_out.xlsx",
+            "test_out_L.pdf",
+            f"test_out_{date_str}.pdf",
+        ]:
             if os.path.exists(f):
                 os.remove(f)
 
@@ -266,6 +276,33 @@ class TestSpreadsheetManager(unittest.TestCase):
             self.manager.query("")
         with self.assertRaises(ValueError):
             self.manager.query("   ")
+
+    def test_export_csv(self):
+        self.manager.export_csv("test_out.csv")
+        self.assertTrue(os.path.exists("test_out.csv"))
+        df2 = pd.read_csv("test_out.csv")
+        self.assertEqual(len(df2), 3)
+
+    def test_export_excel(self):
+        self.manager.export_excel("test_out.xlsx")
+        self.assertTrue(os.path.exists("test_out.xlsx"))
+        df2 = pd.read_excel("test_out.xlsx")
+        self.assertEqual(len(df2), 3)
+
+    def test_export_pdf_advanced(self):
+        output_name = export_to_pdf(
+            self.manager.df,
+            "test_out_{date}.pdf",
+            title="Advanced Export Test",
+            orientation="L",
+            paper_size="Letter",
+            margin=15,
+        )
+        from datetime import datetime
+
+        expected_name = f"test_out_{datetime.now().strftime('%Y-%m-%d')}.pdf"
+        self.assertEqual(output_name, expected_name)
+        self.assertTrue(os.path.exists(expected_name))
 
 
 if __name__ == "__main__":
